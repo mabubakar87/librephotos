@@ -1,6 +1,5 @@
 import logging
 
-import numpy as np
 from django.db import connection
 
 from api.models import Person
@@ -37,96 +36,94 @@ class _Graph:
         return result
 
 
-def _spring_layout(G, k=None, scale=1.0, iterations=50):
-    """Fruchterman-Reingold force-directed layout (vendored from NetworkX).
-
-    Returns a dict mapping each node to a numpy array [x, y].
-    """
-    nodes = G.nodes()
-    n = len(nodes)
-    if n == 0:
-        return {}
-
-    node_index = {node: i for i, node in enumerate(nodes)}
-
-    rng = np.random.default_rng(42)
-    pos = rng.random((n, 2)) * 2.0 - 1.0
-
-    if k is None:
-        k = np.sqrt(1.0 / n)
-
-    t = max(n * 0.1, 0.1)
-    dt = t / (iterations + 1)
-
-    edge_indices = [(node_index[u], node_index[v]) for u, v in G.edges()]
-
-    for _ in range(iterations):
-        # delta[i, j] = pos[i] - pos[j], shape (n, n, 2)
-        delta = pos[:, np.newaxis, :] - pos[np.newaxis, :, :]
-        distance = np.linalg.norm(delta, axis=-1)  # (n, n)
-        np.fill_diagonal(distance, 1e-10)
-
-        # Repulsive forces: k^2 / distance^2 * delta
-        repulsive = (k**2 / distance**2)[:, :, np.newaxis] * delta
-        displacement = repulsive.sum(axis=1)
-
-        # Attractive forces along edges
-        for i_idx, j_idx in edge_indices:
-            d = delta[i_idx, j_idx]
-            dist = distance[i_idx, j_idx]
-            attraction = dist / k * d
-            displacement[i_idx] -= attraction
-            displacement[j_idx] += attraction
-
-        # Limit displacement by temperature
-        disp_norm = np.linalg.norm(displacement, axis=1, keepdims=True)
-        disp_norm = np.where(disp_norm < 1e-10, 1e-10, disp_norm)
-        pos += displacement / disp_norm * np.minimum(disp_norm, t)
-
-        t -= dt
-
-    # Scale to desired range
-    if scale is not None:
-        lim = np.max(np.abs(pos))
-        if lim > 0:
-            pos = pos * scale / lim
-
-    return {node: pos[node_index[node]] for node in nodes}
-
-
 def build_social_graph(user):
+    """Build co-appearance graph: nodes are named people, links weighted by shared photos."""
     try:
-        query = """
+        link_query = """
             WITH face AS (
-                SELECT photo_id, person_id, name, owner_id
+                SELECT DISTINCT ON (photo_id, person_id)
+                    photo_id,
+                    person_id,
+                    api_person.name AS name
                 FROM api_face
                 JOIN api_person ON api_person.id = person_id
                 JOIN api_photo ON api_photo.id = photo_id
                 WHERE person_id IS NOT NULL
-                    AND owner_id = {}
+                    AND api_face.deleted = FALSE
+                    AND api_photo.owner_id = %s
+                ORDER BY
+                    photo_id,
+                    person_id,
+                    CASE
+                        WHEN classification_person_id = person_id
+                            THEN classification_probability
+                        ELSE 1.0
+                    END DESC,
+                    api_face.id
             )
-            SELECT f1.name, f2.name
+            SELECT f1.name, f2.name, COUNT(DISTINCT f1.photo_id) AS weight
             FROM face f1
-            JOIN face f2 USING (photo_id)
-            WHERE f1.person_id != f2.person_id
+            JOIN face f2
+                ON f1.photo_id = f2.photo_id
+                AND f1.person_id < f2.person_id
             GROUP BY f1.name, f2.name
-        """.replace("{}", str(user.id))
-        G = _Graph()
+        """
+        count_query = """
+            WITH face AS (
+                SELECT DISTINCT ON (photo_id, person_id)
+                    photo_id,
+                    person_id,
+                    api_person.name AS name
+                FROM api_face
+                JOIN api_person ON api_person.id = person_id
+                JOIN api_photo ON api_photo.id = photo_id
+                WHERE person_id IS NOT NULL
+                    AND api_face.deleted = FALSE
+                    AND api_photo.owner_id = %s
+                ORDER BY
+                    photo_id,
+                    person_id,
+                    CASE
+                        WHEN classification_person_id = person_id
+                            THEN classification_probability
+                        ELSE 1.0
+                    END DESC,
+                    api_face.id
+            )
+            SELECT name, COUNT(DISTINCT photo_id) AS photo_count
+            FROM face
+            GROUP BY name
+        """
         with connection.cursor() as cursor:
-            cursor.execute(query)
-            links = cursor.fetchall()
-            if len(links) == 0:
+            cursor.execute(link_query, [user.id])
+            link_rows = cursor.fetchall()
+            if not link_rows:
                 return {"nodes": [], "links": []}
-            for link in links:
-                G.add_edge(link[0], link[1])
-        pos = _spring_layout(G, k=1 / 2, scale=1000, iterations=20)
-        return {
-            "nodes": [
-                {"id": node, "x": float(coords[0]), "y": float(coords[1])}
-                for node, coords in pos.items()
-            ],
-            "links": [{"source": pair[0], "target": pair[1]} for pair in G.edges()],
-        }
+
+            cursor.execute(count_query, [user.id])
+            photo_counts = {row[0]: int(row[1]) for row in cursor.fetchall()}
+
+        names_in_graph: set[str] = set()
+        links = []
+        for source, target, weight in link_rows:
+            names_in_graph.add(source)
+            names_in_graph.add(target)
+            links.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "weight": int(weight),
+                }
+            )
+
+        nodes = [
+            {
+                "id": name,
+                "photo_count": photo_counts.get(name, 1),
+            }
+            for name in sorted(names_in_graph)
+        ]
+        return {"nodes": nodes, "links": links}
     except Exception:
         logger.exception(f"Error building social graph for user {user.id}")
         raise

@@ -1,5 +1,7 @@
 import datetime
 import logging
+import threading
+import time
 import uuid
 
 import numpy as np
@@ -19,6 +21,8 @@ from api.models.cluster import UNKNOWN_CLUSTER_ID, Cluster, get_unknown_cluster
 from api.models.user import User, get_deleted_user
 
 logger = logging.getLogger(__name__)
+
+FACE_CLUSTER_LOG_INTERVAL_SEC = 60
 
 FACE_CLASSIFY_COLUMNS = [
     "person",
@@ -100,7 +104,7 @@ def cluster_all_faces(user, job_id) -> bool:
         job_type=LongRunningJob.JOB_CLUSTER_ALL_FACES,
         job_id=job_id,
     )
-    lrj.update_progress(current=0, target=1)
+    lrj.update_progress(current=0, target=0, step="preparing")
 
     try:
         delete_clustered_people(user)
@@ -177,6 +181,44 @@ def group_indexes_by_label(labels: np.ndarray) -> dict[int, np.ndarray]:
     return {label: np.where(labels == label)[0] for label in np.unique(labels)}
 
 
+def _fit_hdbscan_with_heartbeat(clt, encodings, target_count, lrj=None):
+    """Run HDBSCAN.fit in a worker thread; log and refresh job progress every minute."""
+    error_holder: list[BaseException] = []
+    done = threading.Event()
+
+    def run_fit():
+        try:
+            clt.fit(np.array(encodings))
+        except BaseException as exc:
+            error_holder.append(exc)
+        finally:
+            done.set()
+
+    logger.info(
+        "Face clustering HDBSCAN: fitting %s faces (min_cluster_size=%s)",
+        target_count,
+        clt.min_cluster_size,
+    )
+    thread = threading.Thread(target=run_fit, daemon=True)
+    thread.start()
+    while not done.wait(timeout=FACE_CLUSTER_LOG_INTERVAL_SEC):
+        logger.info(
+            "Face clustering HDBSCAN: still running (%s faces)...",
+            target_count,
+        )
+        if lrj is not None:
+            lrj.update_progress(
+                current=0,
+                target=target_count,
+                step="hdbscan_clustering",
+            )
+    if error_holder:
+        raise error_holder[0]
+    logger.info(
+        "Face clustering HDBSCAN: fit complete (%s faces)", target_count
+    )
+
+
 def create_all_clusters(user: User, lrj: LongRunningJob = None) -> int:
     """Generate Cluster records for each different clustering of people
     :param user: the current user
@@ -190,18 +232,25 @@ def create_all_clusters(user: User, lrj: LongRunningJob = None) -> int:
         return target_count
 
     clt = build_clusterer(user, target_count)
-    logger.info("Before finding clusters")
-    clt.fit(np.array(data["encoding"]))
-    logger.info("After finding clusters")
+    if lrj is not None:
+        lrj.update_progress(
+            current=0, target=target_count, step="hdbscan_clustering"
+        )
+    _fit_hdbscan_with_heartbeat(clt, data["encoding"], target_count, lrj)
 
     sortedIndexes = group_indexes_by_label(clt.labels_)
     maxLen: int = len(str(len(sortedIndexes)))
     all_clusters: list[Cluster] = []
     commit_time = datetime.datetime.now() + datetime.timedelta(seconds=5)
+    last_log_time = time.monotonic()
     count: int = 0
     clusterCount: int = 0
 
-    logger.info(f"Found {len(sortedIndexes)} clusters")
+    logger.info("Found %s HDBSCAN labels; saving cluster records", len(sortedIndexes))
+    if lrj is not None:
+        lrj.update_progress(
+            current=0, target=target_count, step="saving_clusters"
+        )
     for labelID in sorted(
         sortedIndexes, key=lambda key: np.size(sortedIndexes[key]), reverse=True
     ):
@@ -219,13 +268,30 @@ def create_all_clusters(user: User, lrj: LongRunningJob = None) -> int:
             ClusterManager.try_add_cluster(user, clusterId, face_array, maxLen)
         )
 
-        if commit_time < datetime.datetime.now() and lrj is not None:
-            lrj.progress_current = count
-            lrj.progress_target = target_count
-            lrj.save()
-            commit_time = datetime.datetime.now() + datetime.timedelta(seconds=5)
+        now = datetime.datetime.now()
+        if commit_time < now and lrj is not None:
+            lrj.update_progress(
+                current=count, target=target_count, step="saving_clusters"
+            )
+            commit_time = now + datetime.timedelta(seconds=5)
 
-    print(f"[INFO] Created {len(all_clusters)} clusters")
+        if time.monotonic() - last_log_time >= FACE_CLUSTER_LOG_INTERVAL_SEC:
+            logger.info(
+                "Face clustering: saving clusters, %s/%s faces processed",
+                count,
+                target_count,
+            )
+            last_log_time = time.monotonic()
+
+    if lrj is not None:
+        lrj.update_progress(
+            current=target_count, target=target_count, step="clusters_saved"
+        )
+    logger.info(
+        "Created %s cluster records for %s faces",
+        len(all_clusters),
+        target_count,
+    )
     return target_count
 
 
@@ -419,6 +485,11 @@ def train_faces(user: User, job_id) -> bool:
     lrj.update_progress(current=1, target=2)
     try:
         data_known, data_unknown = split_faces_by_label(user)
+        logger.info(
+            "Face training: %s labeled face(s), %s unlabeled to score",
+            len(data_known["id"]),
+            len(data_unknown["id"]),
+        )
 
         if len(data_known["id"]) == 0:
             classifier = None
@@ -456,6 +527,7 @@ def train_faces(user: User, job_id) -> bool:
             return True
         logger.info(f"Number of Cluster: {target_count}")
 
+        last_log_time = time.monotonic()
         for start in range(0, len(data_unknown["encoding"]), 100):
             classify_face_page(
                 user,
@@ -466,6 +538,15 @@ def train_faces(user: User, job_id) -> bool:
                 lrj,
                 target_count,
             )
+            scored = min(start + 100, target_count)
+            now = time.monotonic()
+            if now - last_log_time >= FACE_CLUSTER_LOG_INTERVAL_SEC:
+                logger.info(
+                    "Face training: scored %s/%s unknown faces",
+                    scored,
+                    target_count,
+                )
+                last_log_time = now
 
         lrj.update_progress(current=target_count, target=target_count)
         lrj.complete()

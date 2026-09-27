@@ -7,13 +7,15 @@ export const SocialGraphQueryKeys = ["socialGraph"] as const;
 
 export const Node = z.object({
   id: z.string(),
-  x: z.number(),
-  y: z.number(),
+  photo_count: z.number().default(1),
+  x: z.number().optional(),
+  y: z.number().optional(),
 });
 
 export const Link = z.object({
   source: z.string(),
   target: z.string(),
+  weight: z.number().default(1),
 });
 
 export const PersonDataPointList = z.object({

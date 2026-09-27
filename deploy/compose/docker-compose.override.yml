@@ -25,4 +25,12 @@ services:
       - ../../apps/backend/api/views/tagging.py:/code/api/views/tagging.py:ro
       - ../../apps/backend/api/models/photo_caption.py:/code/api/models/photo_caption.py:ro
       - ../../apps/backend/api/directory_watcher/processing_jobs.py:/code/api/directory_watcher/processing_jobs.py:ro
+      - ../../apps/backend/api/duplicate_detection.py:/code/api/duplicate_detection.py:ro
+      - ../../apps/backend/api/models/long_running_job.py:/code/api/models/long_running_job.py:ro
+      - ../../apps/backend/api/views/duplicates.py:/code/api/views/duplicates.py:ro
+      - ../../apps/backend/api/face_classify.py:/code/api/face_classify.py:ro
+      - ../../apps/backend/api/views/face_train_suggestions.py:/code/api/views/face_train_suggestions.py:ro
+      - ../../apps/backend/api/social_graph.py:/code/api/social_graph.py:ro
+      - ../../apps/backend/api/face_person_deduplication.py:/code/api/face_person_deduplication.py:ro
+      - ../../apps/backend/api/management/commands/dedupe_face_person_labels.py:/code/api/management/commands/dedupe_face_person_labels.py:ro
       - ./urls-gpu-stock.py:/code/librephotos/urls.py:ro

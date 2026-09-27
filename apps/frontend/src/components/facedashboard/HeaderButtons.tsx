@@ -14,7 +14,11 @@ import {
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FaceAnalysisMethod, FacesOrderOption, useTrainFacesMutation } from "../../api_client/faces";
+import {
+  FaceAnalysisMethod,
+  FacesOrderOption,
+  useTrainFaceSuggestionsMutation,
+} from "../../api_client/faces";
 
 type Props = Readonly<{
   selectMode: boolean;
@@ -45,19 +49,19 @@ export function HeaderButtons({
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [queueCanAcceptJob, setQueueCanAcceptJob] = useState(false);
   const navigate = useNavigate();
-  const trainFacesMutation = useTrainFacesMutation();
+  const trainFaceSuggestionsMutation = useTrainFaceSuggestionsMutation();
   const { t } = useTranslation();
   const { tab: activeTab, method: analysisMethod, orderBy, minConfidence } = routeApi.useSearch();
 
   useEffect(() => {
-    if (trainFacesMutation.isPending) {
+    if (trainFaceSuggestionsMutation.isPending) {
       setQueueCanAcceptJob(false);
       setJobType("Train Faces");
     } else {
       setQueueCanAcceptJob(true);
       setJobType("");
     }
-  }, [trainFacesMutation.isPending]);
+  }, [trainFaceSuggestionsMutation.isPending]);
 
   return (
     <>
@@ -200,7 +204,7 @@ export function HeaderButtons({
               loading={jobType === "Train Faces"}
               color="blue"
               variant="light"
-              onClick={() => trainFacesMutation.mutate()}
+              onClick={() => trainFaceSuggestionsMutation.mutate()}
             >
               <Barbell />
             </ActionIcon>

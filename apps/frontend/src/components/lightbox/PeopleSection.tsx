@@ -1,9 +1,30 @@
 import { ActionIcon, Alert, Button, Group, Text, Title, Tooltip } from "@mantine/core";
 import { IconUserPlus, IconUsers } from "@tabler/icons-react";
-import React from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { Photo as PhotoType } from "../../api_client/photos/types";
 import { PersonDetail } from "./PersonDetailComponent";
+
+type PeopleEntry = NonNullable<PhotoType["people"]>[number];
+
+function peopleDisplayOrder(a: PeopleEntry, b: PeopleEntry): number {
+  const tier = (person: PeopleEntry) => {
+    if (person.type === "user") return 0;
+    if (person.type === "classification" || person.type === "cluster") return 1;
+    return 2;
+  };
+  const tierDiff = tier(a) - tier(b);
+  if (tierDiff !== 0) return tierDiff;
+  if (tier(a) === 0) {
+    return (a.name ?? "").localeCompare(b.name ?? "", undefined, { sensitivity: "base" });
+  }
+  if (tier(a) === 1) {
+    const probDiff = (b.probability ?? 0) - (a.probability ?? 0);
+    if (probDiff !== 0) return probDiff;
+    return (a.name ?? "").localeCompare(b.name ?? "", undefined, { sensitivity: "base" });
+  }
+  return a.face_id - b.face_id;
+}
 
 interface PeopleSectionProps {
   photoDetail: PhotoType;
@@ -34,7 +55,10 @@ export function PeopleSection({
 }: PeopleSectionProps) {
   const { t } = useTranslation();
 
-  const people = photoDetail.people ?? [];
+  const people = useMemo(
+    () => [...(photoDetail.people ?? [])].sort(peopleDisplayOrder),
+    [photoDetail.people]
+  );
   const canAddFace = !isPublic && !!onAddFaceRequest;
 
   // Without the add button there is nothing to show for a photo with no faces,

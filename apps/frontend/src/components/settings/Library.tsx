@@ -43,7 +43,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { fetchClient } from "../../api_client/api";
 import { serverAddress } from "../../api_client/apiClient";
 import { useAccessToken } from "../../api_client/auth/hooks";
-import { useTrainFacesMutation } from "../../api_client/faces";
+import { useTrainFaceSuggestionsMutation, useTrainFacesMutation } from "../../api_client/faces";
 import { useFetchNextcloudDirsQuery } from "../../api_client/folders/hooks/useFetchNextcloudDirsQuery";
 import {
   useGenerateAutoAlbumsMutation,
@@ -114,6 +114,7 @@ export function Library() {
   const scanNextcloudPhotos = useScanNextcloudPhotosMutation();
   const deleteMissingPhotos = useDeleteMissingPhotosMutation();
   const trainFaces = useTrainFacesMutation();
+  const trainFaceSuggestions = useTrainFaceSuggestionsMutation();
   const generateOcr = useGenerateOcrMutation();
 
   const onGenerateEventAlbumsButtonClick = () => {
@@ -494,15 +495,28 @@ export function Library() {
               </Stack>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: "content" }}>
-              <Button
-                disabled={!workerAvailability}
-                onClick={() => trainFaces.mutate()}
-                leftSection={<FaceId />}
-                variant="outline"
-                fullWidth
-              >
-                <Trans i18nKey="settings.facesbutton">Train Faces</Trans>
-              </Button>
+              <Stack gap="xs">
+                <Button
+                  disabled={!workerAvailability}
+                  onClick={() => trainFaceSuggestions.mutate()}
+                  loading={trainFaceSuggestions.isPending}
+                  leftSection={<FaceId />}
+                  variant="filled"
+                  fullWidth
+                >
+                  <Trans i18nKey="settings.facesuggestionsbutton">Update suggestions</Trans>
+                </Button>
+                <Button
+                  disabled={!workerAvailability}
+                  onClick={() => trainFaces.mutate()}
+                  loading={trainFaces.isPending}
+                  leftSection={<FaceId />}
+                  variant="outline"
+                  fullWidth
+                >
+                  <Trans i18nKey="settings.facesbutton">Re-cluster all</Trans>
+                </Button>
+              </Stack>
             </Grid.Col>
           </Grid>
           <Grid>

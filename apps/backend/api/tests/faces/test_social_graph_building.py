@@ -94,3 +94,45 @@ class SocialGraphTestCase(TestCase):
         self.assertIn(link["source"], {"Alice", "Bob"})
         self.assertIn(link["target"], {"Alice", "Bob"})
         self.assertNotEqual(link["source"], link["target"])
+        self.assertEqual(link["weight"], 1)
+
+        nodes_by_id = {node["id"]: node for node in result["nodes"]}
+        self.assertEqual(nodes_by_id["Alice"]["photo_count"], 1)
+        self.assertEqual(nodes_by_id["Bob"]["photo_count"], 1)
+
+    def test_build_social_graph_link_weight_shared_photos(self):
+        """Co-appearance in multiple photos increases link weight and photo counts."""
+        person1 = Person.objects.create(name="Alice", cluster_owner=self.user)
+        person2 = Person.objects.create(name="Bob", cluster_owner=self.user)
+
+        for i in range(3):
+            photo = Photo.objects.create(
+                owner=self.user,
+                image_hash=f"testhash-multi-{i}",
+                added_on=timezone.now(),
+            )
+            Face.objects.create(
+                photo=photo,
+                person=person1,
+                location_top=0,
+                location_bottom=100,
+                location_left=0,
+                location_right=100,
+                encoding="0" * 256,
+            )
+            Face.objects.create(
+                photo=photo,
+                person=person2,
+                location_top=0,
+                location_bottom=100,
+                location_left=100,
+                location_right=200,
+                encoding="1" * 256,
+            )
+
+        result = build_social_graph(self.user)
+        self.assertEqual(len(result["links"]), 1)
+        self.assertEqual(result["links"][0]["weight"], 3)
+        nodes_by_id = {node["id"]: node for node in result["nodes"]}
+        self.assertEqual(nodes_by_id["Alice"]["photo_count"], 3)
+        self.assertEqual(nodes_by_id["Bob"]["photo_count"], 3)

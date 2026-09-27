@@ -1,0 +1,38 @@
+# LibrePhotos — follow-ups (local fork / GPU deploy)
+
+## Done (recent — verify in UI, then commit)
+
+- [x] **Social graph Phase 1:** `photo_count` / link `weight`, D3 layout, node size & edge thickness, color tiers (gray/teal/blue/red), legend, always-visible labels
+- [x] **Social graph Phase 2:** min shared photos slider (1–1500), highlight person search, hover tooltips; filter + graph tests (`SocialGraph.test.ts`)
+- [x] **Social graph backend:** `social_graph.py` dedupe per photo/person in SQL; mount in `docker-compose.override.yml`
+- [x] **Face dedupe:** one label per person per photo (`face_person_deduplication.py`); confirmed + inferred cleanup via `dedupe_face_person_labels`; dry-run then live run for `abubakar` (454 confirmed + ~12k inferred groups)
+- [x] **Photo detail People list:** confirmed names top, inferred middle, “Who is this?” bottom (`PeopleSection` + `photos.py` serializer)
+- [x] **Docs:** `statistics.md` (social graph), `face-recognition.md` (one person per photo)
+- [ ] **GPU gaps:** bind-mount `views/faces.py` (or ship image) so label API auto-dedupes; bind-mount `serializers/photos.py` if API sort should apply without frontend-only sort
+
+## Library / workflow (do first)
+
+- [ ] Decide: re-run **Detect Duplicates** (full Pass 2) vs live with partial groups
+- [ ] Complete **Update suggestions**; use **Inferred** tab + **Classification** + **% confident**
+- [ ] Optional: **Re-cluster all** (only if Unknown 001… groups needed; allow hours)
+- [ ] Spot-check social graph after dedupe (refresh page; try slider ~100–500, highlight Abubakar/Masuma)
+
+## Repo / deploy
+
+- [ ] Commit/push fork changes (duplicates, face train/suggestions, duplicate resolve UI, social graph, face dedupe, People sort, compose mounts, docs)
+- [ ] Plan GPU deploy: reduce bind mounts vs align monorepo with GPU image
+
+## Product ideas (consider later)
+
+- [ ] Social graph Phase 3: remember slider/highlight in localStorage; user-configurable color breakpoints
+- [ ] Auto-apply face suggestions above confidence threshold
+- [ ] Job UI: show 0 / N + step during HDBSCAN & duplicate Pass 2
+- [ ] Face job 409 / queue messaging in UI (like duplicates)
+- [ ] Generate face embeddings: per-face progress
+- [ ] Duplicate Pass 2 performance (batching, exact-only mode)
+- [ ] Persisted face classifiers (suggest without full retrain)
+
+## Hygiene
+
+- [ ] Verify event album fix (`apps/frontend/src/routes/_protected/album/events.$id.tsx`) committed if still needed
+- [ ] Ensure new backend tests run in CI for touched paths (`test_social_graph_building`, `test_face_person_per_photo_dedupe`, `test_photo_detail_people_order`)

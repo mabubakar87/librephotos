@@ -1,6 +1,7 @@
 export * from "./useSetFacesPersonLabelMutation";
 export * from "./useAddFaceMutation";
 export * from "./useTrainFacesMutation";
+export * from "./useTrainFaceSuggestionsMutation";
 export * from "./useDeleteFacesMutation";
 export * from "./useFetchIncompleteFacesQuery";
 export * from "./useFetchFacesQuery";

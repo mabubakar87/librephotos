@@ -54,7 +54,9 @@ Computes the numeric encoding for faces that have been detected but not yet enco
 
 ### Find Similar Faces
 
-Clusters the faces into known and unknown groups.
+Clusters the faces into known and unknown groups. This step runs automatically when you use **Train Faces** (before the Train Faces job itself).
+
+Progress is measured in **faces** (not a generic 0/1 step). During the long HDBSCAN clustering phase the counter may stay at **0 / N** for an hour or more on large libraries while the worker is still busy; the job step shows `hdbscan_clustering`. Worker logs emit a **heartbeat about every 60 seconds** during clustering and while cluster records are written to the database. After clustering finishes, the counter advances every few seconds through **saving_clusters** until all faces are processed.
 
 ### Download Models
 

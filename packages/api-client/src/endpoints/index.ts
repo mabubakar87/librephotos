@@ -426,6 +426,12 @@ export async function trainFaces(client: ApiClient): Promise<S.JobTriggerRespons
   return parseResponse(S.JobTriggerResponse, res, "train faces");
 }
 
+/** Train classifiers from labeled faces and score unlabeled ones (no HDBSCAN re-cluster). */
+export async function trainFaceSuggestions(client: ApiClient): Promise<S.JobTriggerResponse> {
+  const res = await client.post<unknown>("/trainfaces/suggestions", {});
+  return parseResponse(S.JobTriggerResponse, res, "train face suggestions");
+}
+
 /* ---- upload / exists --------------------------------------------------- */
 
 export async function existsByHash(client: ApiClient, hashes: string[]): Promise<S.ExistsResponse> {

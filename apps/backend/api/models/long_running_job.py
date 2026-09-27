@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta
 
@@ -5,6 +6,8 @@ from django.db import models
 from django.utils import timezone
 
 from api.models.user import User, get_deleted_user
+
+logger = logging.getLogger(__name__)
 
 
 class LongRunningJob(models.Model):
@@ -104,52 +107,99 @@ class LongRunningJob(models.Model):
         end = self.finished_at or timezone.now()
         return (end - self.started_at).total_seconds()
 
+    def _update_row(self, *, only_if_running=False, **fields):
+        """
+        Persist field updates with QuerySet.update to avoid
+        'Save with update_fields did not affect any rows' on stale instances.
+        """
+        if not self.pk:
+            logger.warning("LongRunningJob has no pk; skip update")
+            return False
+
+        qs = LongRunningJob.objects.filter(pk=self.pk)
+        if only_if_running:
+            qs = qs.filter(finished=False)
+
+        rows = qs.update(**fields)
+        if rows:
+            for name, value in fields.items():
+                setattr(self, name, value)
+            return True
+
+        if not LongRunningJob.objects.filter(pk=self.pk).exists():
+            logger.warning("LongRunningJob pk=%s deleted; skip update", self.pk)
+        return False
+
     def start(self):
         """Mark job as started."""
-        self.started_at = timezone.now()
+        started_at = timezone.now()
+        if self._update_row(started_at=started_at):
+            return
+        self.started_at = started_at
         self.save(update_fields=["started_at"])
 
     def complete(self, result=None):
         """Mark job as successfully completed."""
-        self.finished = True
-        self.finished_at = timezone.now()
+        fields = {
+            "finished": True,
+            "finished_at": timezone.now(),
+        }
+        if result is not None:
+            fields["result"] = result
+        if self._update_row(**fields):
+            return
+        self.finished = fields["finished"]
+        self.finished_at = fields["finished_at"]
         if result is not None:
             self.result = result
         self.save(update_fields=["finished", "finished_at", "result"])
 
     def fail(self, error=None):
         """Mark job as failed with optional error message."""
-        self.failed = True
-        self.finished = True
-        self.finished_at = timezone.now()
+        fields = {
+            "failed": True,
+            "finished": True,
+            "finished_at": timezone.now(),
+        }
         if error is not None:
-            self.result = {"status": "failed", "error": str(error)}
+            fields["result"] = {"status": "failed", "error": str(error)}
+        if self._update_row(**fields):
+            return
+        self.failed = fields["failed"]
+        self.finished = fields["finished"]
+        self.finished_at = fields["finished_at"]
+        if error is not None:
+            self.result = fields["result"]
         self.save(update_fields=["failed", "finished", "finished_at", "result"])
 
     def cancel(self):
         """Mark job as cancelled and finished."""
+        fields = {
+            "cancelled": True,
+            "finished": True,
+            "finished_at": timezone.now(),
+            "result": {"status": "cancelled"},
+        }
+        if self._update_row(**fields):
+            return
         self.cancelled = True
         self.finished = True
-        self.finished_at = timezone.now()
-        self.result = {"status": "cancelled"}
+        self.finished_at = fields["finished_at"]
+        self.result = fields["result"]
         self.save(update_fields=["cancelled", "finished", "finished_at", "result"])
 
     def update_progress(self, current, target=None, step=None):
         """Update job progress counters and optional step description."""
-        update_fields = ["progress_current"]
-        self.progress_current = current
+        fields = {"progress_current": current}
         if target is not None:
-            self.progress_target = target
-            update_fields.append("progress_target")
+            fields["progress_target"] = target
         if step is not None:
-            self.progress_step = step
-            update_fields.append("progress_step")
-        self.save(update_fields=update_fields)
+            fields["progress_step"] = step
+        self._update_row(only_if_running=True, **fields)
 
     def set_result(self, result):
         """Update the job result/progress data."""
-        self.result = result
-        self.save(update_fields=["result"])
+        self._update_row(only_if_running=True, result=result)
 
     @classmethod
     def create_job(cls, user, job_type, job_id=None, start_now=False):

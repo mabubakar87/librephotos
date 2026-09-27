@@ -23,6 +23,7 @@ With 300k photos:
 """
 
 import logging
+import time
 from collections import defaultdict
 
 from django.db.models import Q
@@ -34,6 +35,39 @@ from api.models.long_running_job import LongRunningJob
 from api.perceptual_hash import DEFAULT_HAMMING_THRESHOLD, hamming_distance
 
 logger = logging.getLogger(__name__)
+
+# Pass 2 cross-batch comparisons can run for hours with no DB/UI updates between batches.
+VISUAL_DUPLICATE_LOG_INTERVAL_SEC = 60
+
+
+def _log_detection_progress(stage, current, total, found):
+    pct = (100.0 * current / total) if total else 0.0
+    logger.info(
+        "Duplicate detection [%s]: %s/%s (%.1f%%), candidate pairs=%s",
+        stage,
+        current,
+        total,
+        pct,
+        found,
+    )
+
+
+def _job_duplicate_progress_reporter(job, stage_key):
+    """Log, JSON result, and progress_current/target for the jobs UI."""
+
+    def report(current, total, found):
+        _log_detection_progress(stage_key, current, total, found)
+        job.set_result(
+            {
+                "stage": stage_key,
+                "current": current,
+                "total": total,
+                "found": found,
+            }
+        )
+        job.update_progress(current=current, target=total, step=stage_key)
+
+    return report
 
 
 class BKTree:
@@ -382,7 +416,11 @@ def detect_visual_duplicates(
 
         if progress_callback:
             # Report progress for pass 1 (first 50% of total work)
-            progress_callback(processed // 2, total, pairs_found)
+            current = processed // 2
+            _log_detection_progress(
+                "visual_pass1", current, total, pairs_found
+            )
+            progress_callback(current, total, pairs_found)
 
     logger.info(
         f"Pass 1 complete. Found {pairs_found} within-batch pairs. Starting cross-batch comparison."
@@ -408,8 +446,9 @@ def detect_visual_duplicates(
         # Compare current batch against all previous photos
         # Store the previous photos slice once to avoid repeated slicing
         previous_hashes = all_photo_hashes[:start_idx] if start_idx > 0 else []
+        last_log_time = time.monotonic()
 
-        for photo_id, phash in batch_hashes:
+        for photo_idx, (photo_id, phash) in enumerate(batch_hashes):
             # Only compare against photos in previous batches (avoid duplicate comparisons)
             for prev_id, prev_hash in previous_hashes:
                 distance = hamming_distance(phash, prev_hash)
@@ -417,22 +456,48 @@ def detect_visual_duplicates(
                     uf.union(photo_id, prev_id)
                     pairs_found += 1
 
+            now = time.monotonic()
+            if now - last_log_time >= VISUAL_DUPLICATE_LOG_INTERVAL_SEC:
+                in_batch = photo_idx + 1
+                overall = min(total, total // 2 + (processed + in_batch) // 2)
+                logger.info(
+                    "Visual duplicates Pass 2: batch %s/%s, photo %s/%s in batch "
+                    "(%s prior hashes), overall %s/%s, pairs=%s",
+                    batch_idx + 1,
+                    num_batches,
+                    in_batch,
+                    len(batch_hashes),
+                    len(previous_hashes),
+                    overall,
+                    total,
+                    pairs_found,
+                )
+                if progress_callback:
+                    progress_callback(overall, total, pairs_found)
+                last_log_time = now
+
         processed += len(batch_hashes)
 
         if progress_callback:
             # Report progress for pass 2 (second 50% of total work)
-            progress_callback(total // 2 + processed // 2, total, pairs_found)
+            current = total // 2 + processed // 2
+            _log_detection_progress(
+                "visual_pass2", current, total, pairs_found
+            )
+            progress_callback(current, total, pairs_found)
 
     logger.info(f"Pass 2 complete. Total pairs found: {pairs_found}")
 
     # Create duplicate groups from Union-Find groups
     groups = uf.get_groups()
     duplicates_created = 0
+    groups_to_persist = [g for g in groups if len(g) >= 2]
+    logger.info(
+        "Visual duplicates: persisting %s groups to the database",
+        len(groups_to_persist),
+    )
 
-    for group in groups:
-        if len(group) < 2:
-            continue
-
+    for group_idx, group in enumerate(groups_to_persist):
         # Get Photo objects for this group
         group_photos = Photo.objects.filter(id__in=group)
 
@@ -445,6 +510,13 @@ def detect_visual_duplicates(
 
         if duplicate:
             duplicates_created += 1
+
+        if group_idx > 0 and group_idx % 500 == 0:
+            logger.info(
+                "Visual duplicates: saved %s/%s groups",
+                group_idx,
+                len(groups_to_persist),
+            )
 
     logger.info(
         f"Visual duplicate detection for {user.username}: found {duplicates_created} groups from {pairs_found} pairs"
@@ -481,6 +553,14 @@ def batch_detect_duplicates(user, options=None):
         start_now=True,
     )
 
+    logger.info(
+        "Starting duplicate detection for %s (exact=%s, visual=%s, batch_size=%s)",
+        user.username,
+        detect_exact,
+        detect_visual,
+        batch_size,
+    )
+
     try:
         # Clear pending duplicates if requested
         if clear_pending:
@@ -493,33 +573,15 @@ def batch_detect_duplicates(user, options=None):
 
         # Detect exact copies
         if detect_exact:
-
-            def progress_exact(current, total, found):
-                job.set_result(
-                    {
-                        "stage": "exact_copies",
-                        "current": current,
-                        "total": total,
-                        "found": found,
-                    }
-                )
-
+            progress_exact = _job_duplicate_progress_reporter(job, "exact_copies")
             exact_count = detect_exact_copies(user, progress_exact)
             total_found += exact_count
 
         # Detect visual duplicates
         if detect_visual:
-
-            def progress_visual(current, total, found):
-                job.set_result(
-                    {
-                        "stage": "visual_duplicates",
-                        "current": current,
-                        "total": total,
-                        "found": found,
-                    }
-                )
-
+            progress_visual = _job_duplicate_progress_reporter(
+                job, "visual_duplicates"
+            )
             visual_count = detect_visual_duplicates(
                 user, visual_threshold, progress_visual, batch_size
             )

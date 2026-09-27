@@ -41,6 +41,7 @@ from api.views import (
     dataviz,
     duplicates,
     email_config,
+    face_train_suggestions,
     faces,
     geocode,
     health,
@@ -259,6 +260,10 @@ urlpatterns = [
     re_path(r"^api/photosedit/savecaption", photos.SavePhotoCaption.as_view()),
     re_path(r"^api/photosedit/rotate", photos.RotatePhotoView.as_view()),
     re_path(r"^api/useralbum/share", sharing.SetUserAlbumShared.as_view()),
+    re_path(
+        r"^api/trainfaces/suggestions",
+        face_train_suggestions.TrainFaceSuggestionsView.as_view(),
+    ),
     re_path(r"^api/trainfaces", faces.TrainFaceView.as_view()),
     re_path(r"^api/clusterfaces", dataviz.ClusterFaceView.as_view()),
     re_path(r"^api/socialgraph", dataviz.SocialGraphView.as_view()),

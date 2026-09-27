@@ -23,6 +23,8 @@ from rest_framework.views import APIView
 
 from api.directory_watcher import generate_face_embeddings, scan_faces
 from api.face_classify import cluster_all_faces
+from api.face_person_deduplication import dedupe_labeled_persons_per_photo
+from api.views.face_train_suggestions import face_background_job_running
 from api.ml_models import do_all_models_exist, download_models
 from api.models import Face, Photo, User
 from api.models.person import Person, get_or_create_person
@@ -76,6 +78,14 @@ class TrainFaceView(APIView):
             return Response(
                 {"status": False, "message": "Face clustering is disabled"},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+        if face_background_job_running(request.user):
+            return Response(
+                {
+                    "status": False,
+                    "message": "A face training or clustering job is already running",
+                },
+                status=status.HTTP_409_CONFLICT,
             )
         chain = Chain()
         if not do_all_models_exist():
@@ -390,6 +400,15 @@ class SetFacePersonLabel(APIView):
                 if relabeled is not None:
                     cached_face.person = relabeled.person
 
+        dedupe_result = dedupe_labeled_persons_per_photo(
+            photo_ids=list(updated_photos.keys())
+        )
+        if dedupe_result.faces_unlabeled:
+            for photo_id in dedupe_result.affected_photo_ids:
+                photo = updated_photos.get(photo_id)
+                if photo is not None:
+                    photo.refresh_from_db()
+
         self._recreate_search_captions(list(updated_photos.values()))
 
         # Write face regions to image files if user preference is enabled
@@ -414,6 +433,7 @@ class SetFacePersonLabel(APIView):
                 "results": updated,
                 "updated": updated,
                 "not_updated": not_updated,
+                "duplicate_labels_removed": dedupe_result.faces_unlabeled,
             }
         )
 
@@ -560,12 +580,16 @@ class AddFaceView(APIView):
                 "it will be encoded by the next face training run"
             )
 
+        dedupe_result = dedupe_labeled_persons_per_photo(photo_ids=[photo.id])
         person._calculate_face_count()
         person._set_default_cover_photo()
 
         # The person's name is part of what the photo can be found by.
         photo.refresh_from_db()
         SetFacePersonLabel._recreate_search_captions([photo])
+        if dedupe_result.faces_unlabeled:
+            person._calculate_face_count()
+            person._set_default_cover_photo()
 
         if request.user.save_face_tags_to_disk:
             use_sidecar = (

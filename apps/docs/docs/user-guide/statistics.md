@@ -45,8 +45,11 @@ Each cloud shows at most the top 100 terms, and larger words appear more frequen
 
 A force-directed graph showing the relationships between people in your photos. Each node represents a person, and edges connect people who appear together in the same photos.
 
-- **Nodes** are all drawn the same size and labeled with the person's name; a node's outline turns orange when you hover over it
-- **Edges** connect people who appear together in at least one photo — the graph is unweighted, so every node and edge is drawn the same size
+- **Nodes** are sized by how many labeled photos include that person and labeled with their name; hover highlights a node with an orange outline
+- **Edges** connect people who appear in the same photos — line thickness still reflects relative strength; **color** shows fixed tiers by how many photos they share (gray 1–9, teal 10–99, blue 100–499, red 500+)
+- **Minimum shared photos** — slider hides weak links so the graph stays readable in large libraries
+- **Highlight person** — search by name to dim everyone except that person and their direct co-appearance neighbors
+- **Tooltips** — hover a node or line for exact photo counts
 - **Drag** nodes to rearrange the layout
 - **Zoom** to explore dense areas of the graph
 

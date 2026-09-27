@@ -11,9 +11,11 @@ Duplicates are separate from Stacks because they have different purposes:
 """
 
 import logging
+from datetime import timedelta
 
 from django.core.paginator import Paginator
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
+from django.utils import timezone
 from django_q.tasks import async_task
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -21,7 +23,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Photo
+from api.models import LongRunningJob, Photo
 from api.models.duplicate import Duplicate
 
 logger = logging.getLogger(__name__)
@@ -222,34 +224,41 @@ class DuplicateResolveView(APIView):
                 {"error": "Duplicate group not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
+        keep_photo_id = request.data.get("keep_photo_id")
         keep_photo_hash = request.data.get("keep_photo_hash")
         trash_others = request.data.get("trash_others", True)
 
-        if not keep_photo_hash:
+        if keep_photo_id:
+            keep_qs = duplicate.photos.filter(pk=keep_photo_id)
+        elif keep_photo_hash:
+            # Exact-copy groups may contain several rows with the same image_hash.
+            keep_qs = duplicate.photos.filter(image_hash=keep_photo_hash).order_by(
+                "pk"
+            )
+        else:
             return Response(
-                {"error": "keep_photo_hash is required"},
+                {"error": "keep_photo_id or keep_photo_hash is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Verify photo exists in duplicate group
-        try:
-            keep_photo = duplicate.photos.get(image_hash=keep_photo_hash)
-        except Photo.DoesNotExist:
+        if not keep_qs.exists():
             return Response(
                 {"error": "Photo not found in this duplicate group"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        keep_photo = keep_qs.first()
 
         # Resolve the duplicate
         duplicate.resolve(keep_photo, trash_others)
 
         logger.info(
-            f"Resolved duplicate {duplicate.id}: kept {keep_photo_hash}, trashed {duplicate.trashed_count}"
+            f"Resolved duplicate {duplicate.id}: kept {keep_photo.image_hash}, trashed {duplicate.trashed_count}"
         )
         return Response(
             {
                 "status": "resolved",
-                "kept_photo": keep_photo_hash,
+                "kept_photo": keep_photo.image_hash,
+                "kept_photo_id": str(keep_photo.pk),
                 "trashed_count": duplicate.trashed_count,
             }
         )
@@ -383,6 +392,27 @@ class DetectDuplicatesView(APIView):
             "batch_size": batch_size,
         }
 
+        cutoff = timezone.now() - timedelta(hours=LongRunningJob.STUCK_JOB_HOURS)
+        if (
+            LongRunningJob.objects.filter(
+                started_by=request.user,
+                job_type=LongRunningJob.JOB_DETECT_DUPLICATES,
+                finished=False,
+            )
+            .filter(
+                Q(started_at__gte=cutoff)
+                | Q(started_at__isnull=True, queued_at__gte=cutoff)
+            )
+            .exists()
+        ):
+            return Response(
+                {
+                    "status": "already_running",
+                    "message": "Duplicate detection is already running for this user",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         # Queue background job
         async_task(batch_detect_duplicates, request.user, options)
 
@@ -431,19 +461,16 @@ class DuplicateStatsView(APIView):
             or 0
         )
 
+        user_photos = Photo.objects.filter(owner=request.user)
+
         # Count photos in duplicate groups
         photos_in_duplicates = (
-            Photo.objects.owned_by(request.user)
-            .filter(duplicates__isnull=False)
-            .distinct()
-            .count()
+            user_photos.filter(duplicates__isnull=False).distinct().count()
         )
 
-        total_photos = (
-            Photo.objects.owned_by(request.user)
-            .filter(hidden=False, in_trashcan=False)
-            .count()
-        )
+        total_photos = user_photos.filter(
+            hidden=False, in_trashcan=False
+        ).count()
 
         return Response(
             {

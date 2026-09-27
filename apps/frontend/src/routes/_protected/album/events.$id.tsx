@@ -14,6 +14,25 @@ export const Route = createFileRoute("/_protected/album/events/$id")({
   component: AlbumAutoGalleryView,
 });
 
+/** City-ish label from reverse geocoding; feature count varies by provider/address. */
+function eventAlbumPlaceLabel(
+  geolocation_json: { features?: { text?: string }[]; places?: string[] } | null | undefined
+): string | null {
+  if (!geolocation_json) {
+    return null;
+  }
+  const places = geolocation_json.places;
+  if (Array.isArray(places) && places.length > 0) {
+    return places.length >= 2 ? places[places.length - 2] : places[places.length - 1];
+  }
+  const features = geolocation_json.features;
+  if (!Array.isArray(features) || features.length === 0) {
+    return null;
+  }
+  const idx = features.length >= 3 ? features.length - 3 : features.length - 1;
+  return features[idx]?.text ?? features[features.length - 1]?.text ?? null;
+}
+
 function AlbumAutoGalleryView() {
   const { id } = Route.useParams();
   const { data: album, isFetching } = useFetchAutoAlbumQuery(id ?? ""); // Add null check
@@ -65,14 +84,7 @@ function AlbumAutoGalleryView() {
 
   // Get all unique locations across all dates
   const allLocations = flatMap(Object.values(byDate), datePhotos =>
-    datePhotos
-      .filter(photo => !!photo.geolocation_json.features)
-      .map(photo => {
-        if (photo.geolocation_json.features) {
-          return photo.geolocation_json.features[photo.geolocation_json.features.length - 3].text;
-        }
-        return "";
-      })
+    datePhotos.map(photo => eventAlbumPlaceLabel(photo.geolocation_json)).filter((label): label is string => !!label)
   );
   const uniqueLocations = uniq(allLocations).map(location => <Text key={location}>{location}</Text>);
 

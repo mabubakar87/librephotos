@@ -44,7 +44,7 @@ import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchClient } from "../../api_client/api";
 import { serverAddress } from "../../api_client/apiClient";
-import { useTrainFacesMutation } from "../../api_client/faces";
+import { useTrainFaceSuggestionsMutation } from "../../api_client/faces";
 import {
   useGenerateAutoAlbumsMutation,
   useRescanPhotosMutation,
@@ -153,7 +153,7 @@ export function useSpotlightActions(query: string = "") {
   const rescanPhotos = useRescanPhotosMutation();
   const { mutate: generateAutoAlbums } = useGenerateAutoAlbumsMutation();
   const deleteMissingPhotos = useDeleteMissingPhotosMutation();
-  const trainFaces = useTrainFacesMutation();
+  const trainFaceSuggestions = useTrainFaceSuggestionsMutation();
 
   // Navigation actions
   const navigationActions: SpotlightAction[] = useMemo(
@@ -458,7 +458,7 @@ export function useSpotlightActions(query: string = "") {
         leftSection: React.createElement(IconFaceId, iconProps),
         onClick: () => {
           if (workerAvailable) {
-            trainFaces.mutate();
+            trainFaceSuggestions.mutate();
           }
         },
         disabled: !workerAvailable,
@@ -507,7 +507,7 @@ export function useSpotlightActions(query: string = "") {
         keywords: ["delete", "missing", "cleanup"],
       },
     ],
-    [t, workerAvailable, scanPhotos, rescanPhotos, trainFaces, generateAutoAlbums, deleteMissingPhotos]
+    [t, workerAvailable, scanPhotos, rescanPhotos, trainFaceSuggestions, generateAutoAlbums, deleteMissingPhotos]
   );
 
   // Quick actions

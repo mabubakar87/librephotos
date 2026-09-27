@@ -314,9 +314,9 @@ class CreateAllClustersTest(TestCase):
             create_all_clusters(self.user, lrj)
 
         lrj.refresh_from_db()
-        # Progress is only written once the 5s commit window elapses.
-        self.assertEqual(lrj.progress_current, 0)
-        self.assertEqual(lrj.progress_target, 0)
+        self.assertEqual(lrj.progress_target, 1)
+        self.assertEqual(lrj.progress_current, 1)
+        self.assertEqual(lrj.progress_step, "clusters_saved")
 
 
 # ---------------------------------------------------------------------------

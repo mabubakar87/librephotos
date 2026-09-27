@@ -17,6 +17,22 @@ function trainFacesFailed() {
   });
 }
 
+function trainFaceSuggestions() {
+  showNotification({
+    message: i18n.t("toasts.facesuggestionsstarted"),
+    title: i18n.t("toasts.facesuggestionstitle"),
+    color: "teal",
+  });
+}
+
+function trainFaceSuggestionsFailed() {
+  showNotification({
+    message: i18n.t("toasts.facesuggestionsfailed"),
+    title: i18n.t("toasts.facesuggestionstitle"),
+    color: "red",
+  });
+}
+
 function rescanFaces() {
   showNotification({
     message: i18n.t("toasts.rescanfaces"),
@@ -65,4 +81,6 @@ export const faces = {
   rescanFacesFailed,
   trainFaces,
   trainFacesFailed,
+  trainFaceSuggestions,
+  trainFaceSuggestionsFailed,
 };

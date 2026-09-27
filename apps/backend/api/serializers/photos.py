@@ -19,6 +19,24 @@ from api.serializers.simple import SimpleUserSerializer
 logger = logging.getLogger(__name__)
 
 
+def _photo_people_entry_sort_key(entry: dict) -> tuple:
+    """Confirmed labels first, then inferred/cluster, then unnamed faces."""
+    face_type = entry.get("type") or ""
+    if face_type == "user":
+        tier = 0
+    elif face_type in ("classification", "cluster"):
+        tier = 1
+    else:
+        tier = 2
+    name = (entry.get("name") or "").casefold()
+    face_id = entry.get("face_id") or 0
+    if tier == 1:
+        return (tier, -float(entry.get("probability") or 0), name, face_id)
+    if tier == 0:
+        return (tier, name, face_id)
+    return (tier, face_id)
+
+
 class PhotoSummarySerializer(serializers.ModelSerializer):
     # UUID primary key
     id = serializers.UUIDField(read_only=True)
@@ -597,7 +615,7 @@ class PhotoSerializer(serializers.ModelSerializer):
             return None
 
     def get_people(self, obj) -> list:
-        return [
+        people = [
             {
                 "name": (
                     f.person.name
@@ -649,6 +667,8 @@ class PhotoSerializer(serializers.ModelSerializer):
             # not come back in the photo's own face list either.
             if not f.deleted
         ]
+        people.sort(key=_photo_people_entry_sort_key)
+        return people
 
     def get_embedded_media(self, obj: Photo) -> list[dict]:
         def serialize_file(file):

@@ -240,7 +240,7 @@ function DuplicateModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
   const [lightboxImageHash, setLightboxImageHash] = useState<string | null>(null);
   const [lightboxOpened, { open: openLightbox, close: closeLightbox }] = useDisclosure(false);
 
@@ -265,13 +265,13 @@ function DuplicateModal({
   };
 
   const handleResolve = () => {
-    if (selectedPhoto) {
+    if (selectedPhotoId) {
       resolveDuplicate(
-        { id: duplicateId, keep_photo_hash: selectedPhoto, trash_others: true },
+        { id: duplicateId, keep_photo_id: selectedPhotoId, trash_others: true },
         {
           onSuccess: () => {
             onClose();
-            setSelectedPhoto(null);
+            setSelectedPhotoId(null);
           },
         }
       );
@@ -282,7 +282,7 @@ function DuplicateModal({
     dismissDuplicate(duplicateId, {
       onSuccess: () => {
         onClose();
-        setSelectedPhoto(null);
+        setSelectedPhotoId(null);
       },
     });
   };
@@ -291,18 +291,24 @@ function DuplicateModal({
     revertDuplicate(duplicateId, {
       onSuccess: () => {
         onClose();
-        setSelectedPhoto(null);
+        setSelectedPhotoId(null);
       },
     });
   };
 
+  React.useEffect(() => {
+    if (!opened) {
+      setSelectedPhotoId(null);
+    }
+  }, [duplicateId, opened]);
+
   // Auto-select highest resolution photo when duplicate loads
   React.useEffect(() => {
-    if (duplicate?.photos && duplicate.photos.length > 0 && !selectedPhoto) {
+    if (duplicate?.photos && duplicate.photos.length > 0 && !selectedPhotoId) {
       // First try kept photo
       const kept = duplicate.photos.find(p => p.is_kept);
       if (kept) {
-        setSelectedPhoto(kept.image_hash);
+        setSelectedPhotoId(kept.id);
         return;
       }
       // Otherwise pick best by resolution then size
@@ -312,9 +318,9 @@ function DuplicateModal({
         if (aRes !== bRes) return bRes - aRes;
         return b.size - a.size;
       })[0];
-      setSelectedPhoto(best.image_hash);
+      setSelectedPhotoId(best.id);
     }
-  }, [duplicate, selectedPhoto]);
+  }, [duplicate, selectedPhotoId]);
 
   const getDuplicateDescription = () => {
     if (!duplicate) return "";
@@ -401,10 +407,10 @@ function DuplicateModal({
               <SimpleGrid cols={{ base: 1, sm: 2, md: duplicate.photos.length > 2 ? 3 : 2 }} spacing="md" p="xs">
                 {duplicate.photos.map(photo => (
                   <DuplicatePhotoCard
-                    key={photo.image_hash}
+                    key={photo.id}
                     photo={photo}
-                    isSelected={selectedPhoto === photo.image_hash}
-                    onSelect={() => setSelectedPhoto(photo.image_hash)}
+                    isSelected={selectedPhotoId === photo.id}
+                    onSelect={() => setSelectedPhotoId(photo.id)}
                     onViewFull={() => handleViewFull(photo)}
                     showSelectButton={!isReviewed}
                   />
@@ -449,7 +455,7 @@ function DuplicateModal({
                     leftSection={<IconCheck size={16} />}
                     onClick={handleResolve}
                     loading={isResolving}
-                    disabled={!selectedPhoto}
+                    disabled={!selectedPhotoId}
                   >
                     {t("duplicates.keepandtrash", "Keep Selected & Trash Others")}
                   </Button>

@@ -1,0 +1,27 @@
+import { endpoints } from "@librephotos/api-client";
+import { useMutation } from "@tanstack/react-query";
+import { notification } from "../../../service/notifications";
+import { PeopleAlbumsQueryKeys } from "../../albums/hooks/useFetchPeopleAlbumsQuery";
+import { apiClient, queryClient } from "../../api";
+import { CountStatsQueryKeys } from "../../stats/hooks/useFetchCountStatsQuery";
+import { FacesQueryKeys } from "./useFetchFacesQuery";
+import { IncompleteFacesQueryKeys } from "./useFetchIncompleteFacesQuery";
+
+export const trainFaceSuggestions = () => endpoints.trainFaceSuggestions(apiClient);
+
+export const useTrainFaceSuggestionsMutation = () =>
+  useMutation({
+    mutationFn: () => trainFaceSuggestions(),
+    onSuccess: () => {
+      notification.trainFaceSuggestions();
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: IncompleteFacesQueryKeys });
+        queryClient.invalidateQueries({ queryKey: FacesQueryKeys });
+        queryClient.invalidateQueries({ queryKey: PeopleAlbumsQueryKeys });
+        queryClient.invalidateQueries({ queryKey: CountStatsQueryKeys });
+      }, 100);
+    },
+    onError: () => {
+      notification.trainFaceSuggestionsFailed();
+    },
+  });

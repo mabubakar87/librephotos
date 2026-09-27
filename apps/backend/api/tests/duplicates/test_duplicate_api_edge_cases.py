@@ -11,6 +11,7 @@ Tests cover:
 
 import uuid
 from django.test import TestCase
+from rest_framework import status
 from rest_framework.test import APIClient
 
 from api.models.duplicate import Duplicate
@@ -73,6 +74,30 @@ class DuplicateResolveEdgeCasesTestCase(TestCase):
         # Photo2 was already trashed, shouldn't change
         photo2.refresh_from_db()
         self.assertTrue(photo2.in_trashcan)
+
+    def test_resolve_when_multiple_photos_share_image_hash(self):
+        """Exact-copy groups can link several Photo rows with the same hash."""
+        from api.models import Photo
+
+        photo1 = create_test_photo(owner=self.user)
+        photo2 = create_test_photo(owner=self.user)
+        Photo.objects.filter(pk=photo2.pk).update(image_hash=photo1.image_hash)
+
+        duplicate = Duplicate.objects.create(
+            owner=self.user,
+            duplicate_type=Duplicate.DuplicateType.EXACT_COPY,
+        )
+        duplicate.photos.add(photo1, photo2)
+
+        response = self.client.post(
+            f"/api/duplicates/{duplicate.id}/resolve/",
+            {"keep_photo_id": str(photo2.pk)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        duplicate.refresh_from_db()
+        self.assertEqual(duplicate.kept_photo_id, photo2.pk)
 
     def test_resolve_with_trash_others_false(self):
         """Test resolving without trashing other photos.

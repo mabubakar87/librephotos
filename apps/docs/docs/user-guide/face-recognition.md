@@ -51,11 +51,29 @@ If **Settings → Face Options → Write face tags to image files** is enabled, 
 
 ## Train faces
 
-If you click on the blue button (the barbell icon) in the face dashboard, or the **Train** button on the [Library page](./library.md) (avatar menu → **Library**, under **Faces & People**), the system will try to cluster unknown faces and will try to either match them to already known faces or create a new unknown person.
+Face recognition in the UI is split into two actions on the [Library page](./library.md) (**Faces & People**):
+
+- **Update suggestions** — Trains classifiers from faces you have already named and scores unlabeled faces. Results appear on the **Inferred** tab (use **Classification** mode and adjust **% confident**). This does **not** re-run HDBSCAN or rebuild **Unknown 001** groups. It is the right choice after you have labeled people and want matches on the rest of the library.
+
+- **Re-cluster all** — Deletes and rebuilds face clusters (Find Similar Faces), then runs training automatically. This is slow on large libraries and wipes existing unknown groups; use it when cluster settings changed or you need fresh **Unknown** groupings.
+
+The blue barbell button on the face dashboard runs **Update suggestions** only.
 
 The dashboard has three tabs: **Inferred** (the matches training produced), **Unknown** (faces that were not matched, or that you rejected, grouped under "Unknown - Other"), and **Labeled** (faces you have already named). To see the recommendations, go to the **Inferred** tab. There you can see, for each face, the confidence of the match. By default the dashboard only shows matches it is at least 70% confident about — use the **% confident** filter in the toolbar to lower this threshold and surface weaker recommendations (the filter applies to both the Inferred and Unknown tabs).
 
 To confirm a whole inferred group at once, click the green check-person icon next to the person's name; it appears on the Inferred tab next to persons that already have a name. To confirm individual faces, select them and click the green plus button in the toolbar to add them to the person. To reject faces, select them and click the orange person-off button in the toolbar, which moves them back to "Unknown - Other".
+
+## One person label per photo
+
+Each photo should show at most **one face as a given person**, whether you labeled it yourself or the classifier only suggested a name. The People list on a photo uses your label when present; otherwise it shows the inferred name (`classification_person`). Duplicate confirmed labels or duplicate suggestions for the same name on one image are cleaned by keeping the strongest match (highest probability, or your manual label) and clearing the others. Cleared faces stay on the photo — they become **Who is this?** again, or lose that suggestion.
+
+New confirmed labels are deduplicated automatically when the API supports it. To clean up an existing library (confirmed labels **and** duplicate inferred names), run:
+
+```bash
+python manage.py dedupe_face_person_labels --username YOUR_USERNAME
+```
+
+Add `--dry-run` first to see how many duplicate labels would be removed.
 
 ## Delete faces
 

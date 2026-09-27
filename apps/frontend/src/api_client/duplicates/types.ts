@@ -103,7 +103,8 @@ export type DuplicateStats = z.infer<typeof DuplicateStats>;
 
 // API request/response types
 export const ResolveDuplicateRequest = z.object({
-  keep_photo_hash: z.string(),
+  keep_photo_id: z.string().optional(),
+  keep_photo_hash: z.string().optional(),
   trash_others: z.boolean().default(true),
 });
 export type ResolveDuplicateRequest = z.infer<typeof ResolveDuplicateRequest>;

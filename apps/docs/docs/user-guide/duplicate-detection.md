@@ -61,6 +61,14 @@ The Detection Options aren't remembered between runs, so set them each time you 
 
 Detection runs as a background job. You can monitor progress in the [Job System](./job-system.md).
 
+:::tip Progress during visual duplicate detection
+Visual detection uses a **two-pass** scan over your library. The job counter and progress bar update about **once per minute** during the slow cross-batch pass (Pass 2), not continuously — so the percentage can sit unchanged for a long time while the worker is still busy. That is normal on large libraries.
+
+While a duplicate-detection job is already running, starting another one is rejected (you will see that detection is already in progress). Wait for the current job to finish or cancel it from the jobs list before running again.
+
+Server logs (`qcluster` / worker logs) include heartbeat lines during Pass 2 with batch number, photos processed in the current batch, and overall progress — useful when the UI has not ticked yet.
+:::
+
 ### Reviewing Duplicates
 
 Once detection is complete, duplicates appear as groups on the **Organizing → Duplicate Photos** page:
