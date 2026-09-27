@@ -21,6 +21,7 @@ from api.face_classify import cluster_all_faces
 from api.geocode.photo_location import add_location_to_album_dates, geolocate_photo
 from api.models import Face, LongRunningJob, Photo
 from api.models.album_thing import AlbumThing
+from api import tagging as tagging_util
 from api.models.photo_caption import PhotoCaption
 from api.models.photo_ocr import PhotoOcr
 from api.photo_faces import extract_faces
@@ -203,7 +204,47 @@ def generate_tags(user, job_id: UUID, full_scan=False):
         lrj.fail(error=err)
 
 
-def generate_tag_job(photo_id, job_id: str):
+def generate_tags_retag(
+    user,
+    job_id: UUID,
+    tagging_model: str,
+    force: bool = False,
+    directory_prefix=None,
+):
+    """Tag photos with a chosen model without rescanning files on disk."""
+    lrj = LongRunningJob.get_or_create_job(
+        user=user,
+        job_type=LongRunningJob.JOB_GENERATE_TAGS,
+        job_id=job_id,
+    )
+    try:
+        existing_photos = tagging_util.photos_for_retag(
+            user,
+            tagging_model,
+            force=force,
+            directory_prefix=directory_prefix,
+        )
+        if not _begin_photo_scan(lrj, existing_photos):
+            return
+
+        photo_ids = existing_photos.values_list("pk", flat=True)
+        for idx, photo_id in enumerate(photo_ids):
+            if _scan_cancelled(idx, job_id, "Generate tags job cancelled"):
+                return
+            AsyncTask(
+                generate_tag_job,
+                photo_id,
+                job_id,
+                tagging_model,
+                force,
+            ).run()
+
+    except Exception as err:
+        logger.exception("An error occurred: ")
+        lrj.fail(error=err)
+
+
+def generate_tag_job(photo_id, job_id: str, tagging_model=None, force=False):
     """
     Worker task to generate tags for a single photo.
 
@@ -218,7 +259,9 @@ def generate_tag_job(photo_id, job_id: str):
     error = None
     try:
         caption_instance, created = PhotoCaption.objects.get_or_create(photo=photo)
-        caption_instance.generate_tag_captions(commit=True)
+        caption_instance.generate_tag_captions(
+            commit=True, tagging_model=tagging_model, force=force
+        )
     except Exception as err:
         logger.exception("An error occurred: %s", photo.image_hash)
         failed = True

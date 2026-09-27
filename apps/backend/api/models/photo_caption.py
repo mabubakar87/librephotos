@@ -240,12 +240,16 @@ class PhotoCaption(models.Model):
         """Recreate search captions - directly access PhotoSearch model"""
         from api.models.photo_search import PhotoSearch
 
+        # Search reads captions through its own Photo instance. Point that at
+        # this caption so tags are indexed even before the row is re-fetched.
+        self.photo.caption_instance = self
         search_instance, created = PhotoSearch.objects.get_or_create(photo=self.photo)
+        search_instance.photo = self.photo
         search_instance.recreate_search_captions()
         search_instance.save()
 
-    def generate_tag_captions(self, commit=True):
-        """Generate tags with the active tagging model (MobileCLIP-S2 or SigLIP 2).
+    def generate_tag_captions(self, commit=True, tagging_model=None, force=False):
+        """Generate tags with a tagging model (MobileCLIP-S2 or SigLIP 2).
 
         Tags are stored per-model in captions_json and are never deleted when
         switching models -- only the active model's tags are generated / visible.
@@ -256,14 +260,14 @@ class PhotoCaption(models.Model):
 
         from constance import config as site_config
 
-        tagging_model = site_config.TAGGING_MODEL
+        tagging_model = tagging_model or site_config.TAGGING_MODEL
 
         if not self.photo.thumbnail or not self.photo.thumbnail.thumbnail_big:
             return
 
-        # Skip if this photo already has tags from the active model
         if (
-            self.captions_json is not None
+            not force
+            and self.captions_json is not None
             and self.captions_json.get(tagging_model) is not None
         ):
             return
@@ -306,13 +310,13 @@ class PhotoCaption(models.Model):
             if self.captions_json is None:
                 self.captions_json = {}
 
-            # Store under the model-specific key
+            # Persist tags before search indexing. Search loads captions from
+            # the database, so an unsaved JSON update would be skipped.
             self.captions_json[tagging_model] = tags_result
-            self.recreate_search_captions()
-            self._update_tag_album_things(tags_result, tagging_model)
-
             if commit:
                 self.save()
+            self.recreate_search_captions()
+            self._update_tag_album_things(tags_result, tagging_model)
             logger.info(f"generated {tagging_model} tags for image {image_path}.")
         except Exception as e:
             logger.exception(

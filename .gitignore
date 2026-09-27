@@ -30,3 +30,6 @@ htmlcov/
 .testtmp-*/
 # Cygwin/MSYS crash dumps
 *.stackdump
+
+# Local library: photos, Postgres data, and downloaded models
+/data/

@@ -64,6 +64,7 @@ import { notification } from "../../service/notifications";
 import { CountStats } from "../CountStats";
 import { ModalNextcloudScanDirectoryEdit } from "../modals/ModalNextcloudScanDirectoryEdit";
 import { ModalUserEdit } from "../modals/ModalUserEdit";
+import { RetagPhotosSettings } from "./RetagPhotosSettings";
 
 function BadgeIcon(details: User, isSuccess: boolean, isError: boolean, isFetching: boolean) {
   const { nextcloud_server_address: server } = details;
@@ -340,6 +341,13 @@ export function Library() {
                 </Group>
               </Grid.Col>
             </Grid>
+
+            <Divider />
+
+            <RetagPhotosSettings
+              workerAvailable={workerAvailability}
+              onRequireWorker={() => notification.scanDirectoryRequired()}
+            />
 
             <Collapse in={isOpenNextcloudHelp}>
               <Stack gap={0}>

@@ -112,6 +112,14 @@ function startFullPhotoScan() {
   });
 }
 
+function startRetagPhotos() {
+  showNotification({
+    message: i18n.t("toasts.retagphotos"),
+    title: i18n.t("toasts.retagphotostitle"),
+    color: "teal",
+  });
+}
+
 function startOcrScan() {
   showNotification({
     message: i18n.t("toasts.ocrscan"),
@@ -214,6 +222,7 @@ export const photos = {
   scanDirectoryRequired,
   startFullOcrScan,
   startFullPhotoScan,
+  startRetagPhotos,
   startNextcloudPhotoScan,
   startOcrScan,
   startPhotoScan,

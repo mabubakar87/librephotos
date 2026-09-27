@@ -1,4 +1,4 @@
-"""librephotos URL Configuration
+﻿"""librephotos URL Configuration
 
 The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/1.11/topics/http/urls/
@@ -45,29 +45,22 @@ from api.views import (
     geocode,
     health,
     jobs,
-    media,
-    memories,
     password_reset,
     photo_metadata,
     photos,
     public_albums,
-    public_photos,
-    scan_triggers,
     search,
-    server_info,
     services,
     serving_diagnostics,
     sharing,
-    site_settings,
     sso,
     stacks,
-    sync,
     tagging,
     tags,
     timezone,
     upload,
     user,
-    zip_downloads,
+    views,
 )
 from nextcloud import views as nextcloud_views
 import os
@@ -158,7 +151,7 @@ router.register(
 )
 
 router.register(
-    r"api/albums/user/edit", albums.AlbumUserEditViewSet, basename="edit_album_user"
+    r"api/albums/user/edit", views.AlbumUserEditViewSet, basename="edit_album_user"
 )
 
 router.register(
@@ -240,13 +233,12 @@ urlpatterns = [
     re_path(r"^api/healthz/ready/?$", health.HealthzReadyView.as_view()),
     re_path(r"^api/healthz/?$", health.HealthzView.as_view()),
     re_path(r"^api/django-admin/", admin.site.urls),
-    re_path(r"^api/sitesettings", site_settings.SiteSettingsView.as_view()),
+    re_path(r"^api/sitesettings", views.SiteSettingsView.as_view()),
     re_path(r"^api/email-config/test/?$", email_config.EmailTestView.as_view()),
     re_path(r"^api/email-config/?$", email_config.EmailConfigView.as_view()),
     re_path(r"^api/firsttimesetup", user.IsFirstTimeSetupView.as_view()),
     re_path(r"^api/dirtree", user.RootPathTreeView.as_view()),
     re_path(r"^api/labelfaces", faces.SetFacePersonLabel.as_view()),
-    re_path(r"^api/addface", faces.AddFaceView.as_view()),
     re_path(r"^api/deletefaces", faces.DeleteFaces.as_view()),
     re_path(r"^api/savemetadata", photos.SaveMetadataView.as_view()),
     re_path(r"^api/photosedit/delete", photos.DeletePhotos.as_view()),
@@ -258,22 +250,20 @@ urlpatterns = [
     re_path(r"^api/photosedit/generateim2txt", photos.GeneratePhotoCaption.as_view()),
     re_path(r"^api/photosedit/savecaption", photos.SavePhotoCaption.as_view()),
     re_path(r"^api/photosedit/rotate", photos.RotatePhotoView.as_view()),
-    re_path(r"^api/useralbum/share", sharing.SetUserAlbumShared.as_view()),
+    re_path(r"^api/useralbum/share", views.SetUserAlbumShared.as_view()),
     re_path(r"^api/trainfaces", faces.TrainFaceView.as_view()),
     re_path(r"^api/clusterfaces", dataviz.ClusterFaceView.as_view()),
     re_path(r"^api/socialgraph", dataviz.SocialGraphView.as_view()),
-    re_path(r"^api/scanphotos", scan_triggers.ScanPhotosView.as_view()),
-    re_path(r"^api/scanuploadedphotos", scan_triggers.FullScanPhotosView.as_view()),
-    re_path(r"^api/fullscanphotos", scan_triggers.FullScanPhotosView.as_view()),
+    re_path(r"^api/scanphotos", views.ScanPhotosView.as_view()),
     re_path(r"^api/tagging/stats", tagging.TaggingStatsView.as_view()),
     re_path(r"^api/tagging/models", tagging.TaggingModelsView.as_view()),
     re_path(r"^api/retagphotos", tagging.RetagPhotosView.as_view()),
+    re_path(r"^api/scanuploadedphotos", views.FullScanPhotosView.as_view()),
+    re_path(r"^api/fullscanphotos", views.FullScanPhotosView.as_view()),
     re_path(r"^api/scanfaces", faces.ScanFacesView.as_view()),
-    re_path(
-        r"^api/deletemissingphotos", scan_triggers.DeleteMissingPhotosView.as_view()
-    ),
-    re_path(r"^api/classifymedia", scan_triggers.ClassifyMediaView.as_view()),
-    re_path(r"^api/generateocr", scan_triggers.GenerateOcrView.as_view()),
+    re_path(r"^api/deletemissingphotos", views.DeleteMissingPhotosView.as_view()),
+    re_path(r"^api/classifymedia", views.ClassifyMediaView.as_view()),
+    re_path(r"^api/generateocr", views.GenerateOcrView.as_view()),
     re_path(r"^api/autoalbumgen", album_auto.AutoAlbumGenerateView.as_view()),
     re_path(r"^api/autoalbumtitlegen", album_auto.RegenerateAutoAlbumTitles.as_view()),
     # Photo Stacks - Organizational grouping (bursts, brackets, manual)
@@ -359,8 +349,7 @@ urlpatterns = [
         photos.SetMainFileView.as_view(),
         name="set_main_file",
     ),
-    re_path(r"^api/memories/?$", memories.MemoriesView.as_view()),
-    re_path(r"^api/searchtermexamples", search.SearchTermExamples.as_view()),
+    re_path(r"^api/searchtermexamples", views.SearchTermExamples.as_view()),
     re_path(r"^api/locationsunburst", dataviz.LocationSunburst.as_view()),
     re_path(r"^api/locationtimeline", dataviz.LocationTimeline.as_view()),
     re_path(r"^api/defaultrules", user.DefaultRulesView.as_view()),
@@ -368,8 +357,8 @@ urlpatterns = [
     re_path(r"^api/defaultburstrules", user.DefaultBurstRulesView.as_view()),
     re_path(r"^api/predefinedburstrules", user.PredefinedBurstRulesView.as_view()),
     re_path(r"^api/stats", dataviz.StatsView.as_view()),
-    re_path(r"^api/storagestats", server_info.StorageStatsView.as_view()),
-    re_path(r"^api/imagetag", server_info.ImageTagView.as_view()),
+    re_path(r"^api/storagestats", views.StorageStatsView.as_view()),
+    re_path(r"^api/imagetag", views.ImageTagView.as_view()),
     re_path(r"^api/serverstats", dataviz.ServerStatsView.as_view()),
     re_path(r"^api/serverlogs/view$", dataviz.ServerLogsViewerView.as_view()),
     re_path(r"^api/serverlogs$", dataviz.ServerLogsView.as_view()),
@@ -412,18 +401,18 @@ urlpatterns = [
     ),
     re_path(
         r"^media/(?P<path>.*)/(?P<fname>.*)",
-        media.UnifiedMediaAccessView.as_view(),
+        views.UnifiedMediaAccessView.as_view(),
         name="media",
     ),
     re_path(
-        r"^api/delete/zip/(?P<fname>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/?$",
-        zip_downloads.DeleteZipView.as_view(),
+        r"^api/delete/zip/(?P<fname>.*)",
+        views.DeleteZipView.as_view(),
         name="delete-zip",
     ),
     re_path(r"^api/rqavailable/$", jobs.QueueAvailabilityView.as_view()),
     re_path(r"^api/nextcloud/listdir", nextcloud_views.ListDir.as_view()),
     re_path(r"^api/nextcloud/scanphotos", nextcloud_views.ScanPhotosView.as_view()),
-    re_path(r"^api/photos/download$", zip_downloads.ZipListPhotosView_V2.as_view()),
+    re_path(r"^api/photos/download$", views.ZipListPhotosView_V2.as_view()),
     # Public album by slug
     re_path(
         r"^api/public/albums/s/(?P<slug>[^/]+)/$",
@@ -436,32 +425,10 @@ urlpatterns = [
     ),
     # Toggle album public flag
     re_path(r"^api/useralbum/makepublic", public_albums.SetUserAlbumPublic.as_view()),
-    # Public photo by share slug, and its slug-scoped media
-    re_path(
-        r"^api/public/photo/(?P<slug>[^/]+)/$",
-        public_photos.PublicPhotoBySlug.as_view(),
-    ),
-    re_path(
-        r"^api/public/photo/(?P<slug>[^/]+)/media/(?P<kind>[^/]+)/$",
-        public_photos.PublicPhotoMediaBySlug.as_view(),
-    ),
-    # Create, rotate or revoke a photo share
-    re_path(r"^api/photo/share/list/?$", public_photos.PhotoShareList.as_view()),
-    re_path(r"^api/photo/share/?$", public_photos.SetPhotoShare.as_view()),
     re_path(r"^api/timezones", timezone.TimeZoneView.as_view()),
     re_path(r"^api/geocode/search", geocode.GeocodeSearchView.as_view()),
     re_path(r"api/upload/complete/", upload.UploadPhotosChunkedComplete.as_view()),
     re_path(r"api/upload/", upload.UploadPhotosChunked.as_view()),
-    # Mobile-v2 delta-sync feeds (doc 04)
-    re_path(r"^api/sync/photos/?$", sync.SyncPhotosView.as_view()),
-    re_path(r"^api/sync/persons/?$", sync.SyncPersonsView.as_view()),
-    re_path(r"^api/sync/albums/user/?$", sync.SyncUserAlbumsView.as_view()),
-    re_path(r"^api/sync/albums/auto/?$", sync.SyncAutoAlbumsView.as_view()),
-    re_path(r"^api/sync/albums/thing/?$", sync.SyncThingAlbumsView.as_view()),
-    re_path(r"^api/sync/albums/place/?$", sync.SyncPlaceAlbumsView.as_view()),
-    re_path(r"^api/sync/albums/tag/?$", sync.SyncTagAlbumsView.as_view()),
-    re_path(r"^api/sync/sharing/?$", sync.SyncSharingView.as_view()),
-    re_path(r"^api/sync/counts/?$", sync.SyncCountsView.as_view()),
 ]
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
@@ -477,7 +444,7 @@ if settings.DEBUG:
         re_path(r"^api/schema", SpectacularAPIView.as_view(), name="schema"),
         re_path(r"^api/swagger", SpectacularSwaggerView.as_view(), name="swagger-ui"),
         re_path(r"^api/redoc", SpectacularRedocView.as_view(), name="redoc"),
-        re_path(r"^api/help$", server_info.ApiHelpView.as_view()),
+        re_path(r"^api/help$", views.ApiHelpView.as_view()),
     ]
 
 # Configure media and frontend serving for no-proxy (SERVE_FRONTEND) mode

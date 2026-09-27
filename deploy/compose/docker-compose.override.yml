@@ -1,0 +1,28 @@
+services:
+  frontend:
+    image: librephotos-frontend-local:retag
+    build:
+      context: ../..
+      dockerfile: deploy/docker/frontend/Dockerfile
+
+  backend:
+    entrypoint: ["bash", "/start-backend.sh"]
+    command: []
+    # device-selection:start
+    image: reallibrephotos/librephotos-gpu:latest
+    gpus: all
+    # device-selection:end
+    volumes:
+      - ./start-backend.sh:/start-backend.sh:ro
+      - ./keep-workers.sh:/keep-workers.sh:ro
+      - ./gpu_runtime.py:/opt/librephotos/gpu_runtime.py:ro
+      - ./ensure_llama_cuda.py:/opt/librephotos/ensure_llama_cuda.py:ro
+      - ./clip_semantic_search.py:/code/service/clip_embeddings/semantic_search/semantic_search.py:ro
+      - ./face_main.py:/code/service/face_recognition/main.py:ro
+      - ./siglip2.py:/code/service/tags/siglip2/siglip2.py:ro
+      - ./llm_main.py:/code/service/llm/main.py:ro
+      - ../../apps/backend/api/tagging.py:/code/api/tagging.py:ro
+      - ../../apps/backend/api/views/tagging.py:/code/api/views/tagging.py:ro
+      - ../../apps/backend/api/models/photo_caption.py:/code/api/models/photo_caption.py:ro
+      - ../../apps/backend/api/directory_watcher/processing_jobs.py:/code/api/directory_watcher/processing_jobs.py:ro
+      - ./urls-gpu-stock.py:/code/librephotos/urls.py:ro
