@@ -1,0 +1,2 @@
+# Shell scripts under deploy/ run in Linux containers; CRLF breaks bash.
+deploy/**/*.sh text eol=lf
