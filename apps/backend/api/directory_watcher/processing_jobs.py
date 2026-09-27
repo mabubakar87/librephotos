@@ -5,7 +5,6 @@ These jobs run after the main scan to enrich photos with additional
 metadata like location information, image tags, and face detection.
 """
 
-import logging
 import os
 import traceback
 import uuid
@@ -15,23 +14,19 @@ from django import db
 from django.db.models import Q
 from django_q.tasks import AsyncTask
 
-from api import sidecars
+from api import util
 from api.document_detection import classify_document
 from api.face_classify import cluster_all_faces
-from api.geocode.photo_location import add_location_to_album_dates, geolocate_photo
 from api.models import Face, LongRunningJob, Photo
 from api.models.album_thing import AlbumThing
 from api import tagging as tagging_util
 from api.models.photo_caption import PhotoCaption
 from api.models.photo_ocr import PhotoOcr
-from api.photo_faces import extract_faces
 from api.directory_watcher.utils import (
     CANCELLATION_CHECK_INTERVAL,
     is_job_cancelled,
     update_scan_counter,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _encode_face(face: Face, job_id: UUID):
@@ -40,15 +35,11 @@ def _encode_face(face: Face, job_id: UUID):
     try:
         face.generate_encoding()
     except Exception as err:
-        logger.exception(f"Could not generate an encoding for face {face.id}")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         failed = True
         error = f"Face {face.id}: {str(err)}\n{traceback.format_exc()}"
     update_scan_counter(job_id, failed, error)
-
-
-def _faces_missing_encoding(user):
-    """Faces on ``user``'s photos that have no encoding yet."""
-    return Face.objects.filter(photo__in=Photo.objects.owned_by(user), encoding="")
 
 
 def generate_face_embeddings(user, job_id: UUID):
@@ -59,7 +50,7 @@ def generate_face_embeddings(user, job_id: UUID):
         user: The user whose faces to process
         job_id: Job ID for tracking progress
     """
-    if not _faces_missing_encoding(user).exists():
+    if Face.objects.filter(encoding="").count() == 0:
         return
 
     lrj = LongRunningJob.get_or_create_job(
@@ -69,7 +60,7 @@ def generate_face_embeddings(user, job_id: UUID):
     )
 
     try:
-        faces = _faces_missing_encoding(user)
+        faces = Face.objects.filter(encoding="")
         lrj.update_progress(current=0, target=faces.count())
         db.connections.close_all()
 
@@ -81,7 +72,8 @@ def generate_face_embeddings(user, job_id: UUID):
         lrj.complete()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
@@ -115,45 +107,14 @@ def _begin_photo_scan(lrj, existing_photos) -> bool:
 def _scan_cancelled(idx: int, job_id, message: str) -> bool:
     """Periodic cancellation check for the per-photo loops."""
     if idx % CANCELLATION_CHECK_INTERVAL == 0 and is_job_cancelled(job_id):
-        logger.info(message)
+        util.logger.info(message)
         return True
     return False
 
 
-def _queue_per_photo_tasks(task, photos, job_id, cancelled_message: str):
-    """Queue ``task(photo_id, job_id)`` for each photo.
-
-    The queue gets primary keys, not pickled ``Photo`` instances: the payload
-    stays small and the worker works on the row as it is when the task runs.
-    """
-    photo_ids = photos.values_list("pk", flat=True)
-    for idx, photo_id in enumerate(photo_ids):
-        if _scan_cancelled(idx, job_id, cancelled_message):
-            return
-        AsyncTask(task, photo_id, job_id).run()
-
-
-def _photo_for_task(photo_id, job_id) -> Photo | None:
-    """Load the photo a queued per-photo task is for, or ``None`` to skip it.
-
-    Cancelling a job only stops more tasks from being queued, so a task still
-    in the queue checks the flag itself and does nothing for a cancelled job.
-    A photo deleted since it was queued still counts toward the job, so the
-    job can reach its target and finish.
-    """
-    if is_job_cancelled(job_id):
-        return None
-    # Tasks queued before the switch to ids carry the Photo itself.
-    photo_id = getattr(photo_id, "pk", photo_id)
-    photo = Photo.objects.filter(pk=photo_id).first()
-    if photo is None:
-        logger.info(f"Photo {photo_id} is gone, nothing to do for job {job_id}")
-        update_scan_counter(job_id)
-    return photo
-
-
 def _record_photo_error(photo: Photo, err: Exception) -> str:
-    logger.exception("An error occurred: ")
+    util.logger.exception("An error occurred: ")
+    print(f"[ERR]: {err}")
     return f"Photo {photo.image_hash}: {str(err)}\n{traceback.format_exc()}"
 
 
@@ -163,10 +124,13 @@ def _untagged_photos(user):
 
     tagging_model = site_config.TAGGING_MODEL
 
-    return Photo.objects.owned_by(user).filter(
-        Q(caption_instance__isnull=True)
-        | Q(caption_instance__captions_json__isnull=True)
-        | Q(**{f"caption_instance__captions_json__{tagging_model}__isnull": True})
+    return Photo.objects.filter(
+        Q(owner=user.id)
+        & (
+            Q(caption_instance__isnull=True)
+            | Q(caption_instance__captions_json__isnull=True)
+            | Q(**{f"caption_instance__captions_json__{tagging_model}__isnull": True})
+        )
     )
 
 
@@ -195,12 +159,14 @@ def generate_tags(user, job_id: UUID, full_scan=False):
         if not _begin_photo_scan(lrj, existing_photos):
             return
 
-        _queue_per_photo_tasks(
-            generate_tag_job, existing_photos, job_id, "Generate tags job cancelled"
-        )
+        for idx, photo in enumerate(existing_photos):
+            if _scan_cancelled(idx, job_id, "Generate tags job cancelled"):
+                return
+            AsyncTask(generate_tag_job, photo, job_id).run()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
@@ -227,43 +193,42 @@ def generate_tags_retag(
         if not _begin_photo_scan(lrj, existing_photos):
             return
 
-        photo_ids = existing_photos.values_list("pk", flat=True)
-        for idx, photo_id in enumerate(photo_ids):
+        for idx, photo in enumerate(existing_photos):
             if _scan_cancelled(idx, job_id, "Generate tags job cancelled"):
                 return
             AsyncTask(
                 generate_tag_job,
-                photo_id,
+                photo,
                 job_id,
                 tagging_model,
                 force,
             ).run()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
-def generate_tag_job(photo_id, job_id: str, tagging_model=None, force=False):
+def generate_tag_job(photo: Photo, job_id: str, tagging_model=None, force=False):
     """
     Worker task to generate tags for a single photo.
 
     Args:
-        photo_id: Primary key of the photo to process
+        photo: The photo to process
         job_id: Job ID for tracking progress
     """
-    photo = _photo_for_task(photo_id, job_id)
-    if photo is None:
-        return
     failed = False
     error = None
     try:
+        photo.refresh_from_db()
         caption_instance, created = PhotoCaption.objects.get_or_create(photo=photo)
         caption_instance.generate_tag_captions(
             commit=True, tagging_model=tagging_model, force=force
         )
     except Exception as err:
-        logger.exception("An error occurred: %s", photo.image_hash)
+        util.logger.exception("An error occurred: %s", photo.image_hash)
+        print(f"[ERR]: {err}")
         failed = True
         error_msg = f"Photo {photo.image_hash}: {str(err)}\n{traceback.format_exc()}"
         error = error_msg
@@ -361,7 +326,7 @@ def generate_ocr(user, job_id: UUID, full_scan=False):
             .first()
         )
 
-        existing_photos = Photo.objects.owned_by(user).filter(video=False)
+        existing_photos = Photo.objects.filter(owner=user.id).filter(video=False)
         if not full_scan:
             # Skip photos already OCR'd with the active model (idempotency).
             existing_photos = existing_photos.exclude(ocr__engine=ocr_model)
@@ -373,35 +338,42 @@ def generate_ocr(user, job_id: UUID, full_scan=False):
                     Q(added_on__gt=last_scan.started_at) | Q(ocr__isnull=False)
                 )
 
-        if not _begin_photo_scan(lrj, existing_photos):
+        if existing_photos.count() == 0:
+            lrj.update_progress(current=0, target=0)
+            lrj.complete()
             return
+        lrj.update_progress(current=0, target=existing_photos.count())
+        db.connections.close_all()
 
-        _queue_per_photo_tasks(
-            generate_ocr_job, existing_photos, job_id, "Generate OCR job cancelled"
-        )
+        for idx, photo in enumerate(existing_photos):
+            # Check for cancellation periodically
+            if idx % CANCELLATION_CHECK_INTERVAL == 0 and is_job_cancelled(job_id):
+                util.logger.info("Generate OCR job cancelled")
+                return
+            AsyncTask(generate_ocr_job, photo, job_id).run()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
-def generate_ocr_job(photo_id, job_id: str):
+def generate_ocr_job(photo: Photo, job_id: str):
     """
     Worker task to run OCR for a single photo and store the result.
 
     Args:
-        photo_id: Primary key of the photo to process
+        photo: The photo to process
         job_id: Job ID for tracking progress
     """
-    photo = _photo_for_task(photo_id, job_id)
-    if photo is None:
-        return
     failed = False
     error = None
     try:
+        photo.refresh_from_db()
         _run_ocr_for_photo(photo)
     except Exception as err:
-        logger.exception("An error occurred: %s", photo.image_hash)
+        util.logger.exception("An error occurred: %s", photo.image_hash)
+        print(f"[ERR]: {err}")
         failed = True
         error_msg = f"Photo {photo.image_hash}: {str(err)}\n{traceback.format_exc()}"
         error = error_msg
@@ -476,21 +448,18 @@ def _run_ocr_for_photo(photo: Photo):
 
     image_path = ocr_image_source(photo)
     if not image_path:
-        logger.warning(f"No OCR image source for photo {photo.image_hash}")
+        util.logger.warning(f"No OCR image source for photo {photo.image_hash}")
         return
 
-    try:
-        response = sidecars.post(
-            "ocr",
-            "/ocr",
-            json={"image_path": image_path, "min_confidence": OCR_MIN_CONFIDENCE},
-            timeout=OCR,
-        )
-    except requests.HTTPError as error:
+    response = requests.post(
+        "http://localhost:8012/ocr",
+        json={"image_path": image_path, "min_confidence": OCR_MIN_CONFIDENCE},
+        timeout=OCR,
+    )
+    if not response.ok:
         raise RuntimeError(
-            f"OCR service returned status {error.response.status_code} "
-            f"for {image_path}: {sidecars.error_detail(error)}"
-        ) from error
+            f"OCR service returned status {response.status_code} for {image_path}"
+        )
 
     data = response.json()
     ocr_text = data.get("text", "") or ""
@@ -518,7 +487,7 @@ def _run_ocr_for_photo(photo: Photo):
 
     # Note: OCR text is not folded into PhotoSearch.recreate_search_captions yet
     # -- indexing OCR text for search is a separate work package.
-    logger.info(
+    util.logger.info(
         f"generated OCR ({ocr_model}) for image {image_path} "
         f"({len(data.get('text', '') or '')} chars)."
     )
@@ -557,7 +526,7 @@ def classify_media(user, job_id: UUID):
         # select_related the OCR row so the per-photo is_document derivation does
         # not issue an extra query just to discover whether OCR exists.
         existing_photos = (
-            Photo.objects.owned_by(user)
+            Photo.objects.filter(owner=user.id)
             .exclude(category_source="user")
             .select_related("ocr")
         )
@@ -588,7 +557,7 @@ def classify_media(user, job_id: UUID):
         for idx, photo in enumerate(existing_photos.iterator()):
             # Check for cancellation periodically
             if idx % CANCELLATION_CHECK_INTERVAL == 0 and is_job_cancelled(job_id):
-                logger.info("Classify media job cancelled")
+                util.logger.info("Classify media job cancelled")
                 return
             failed = False
             error = None
@@ -612,7 +581,8 @@ def classify_media(user, job_id: UUID):
                 if len(pending_screenshot) + len(pending_document) >= BATCH_SIZE:
                     flush()
             except Exception as err:
-                logger.exception("An error occurred: ")
+                util.logger.exception("An error occurred: ")
+                print(f"[ERR]: {err}")
                 failed = True
                 error_msg = (
                     f"Photo {photo.image_hash}: {str(err)}\n{traceback.format_exc()}"
@@ -623,7 +593,8 @@ def classify_media(user, job_id: UUID):
         flush()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
@@ -644,7 +615,7 @@ def add_geolocation(user, job_id: UUID, full_scan=False):
 
     try:
         existing_photos = _limit_to_photos_added_since_last_scan(
-            Photo.objects.owned_by(user),
+            Photo.objects.filter(owner=user.id),
             user,
             LongRunningJob.JOB_ADD_GEOLOCATION,
             full_scan,
@@ -652,33 +623,33 @@ def add_geolocation(user, job_id: UUID, full_scan=False):
         if not _begin_photo_scan(lrj, existing_photos):
             return
 
-        _queue_per_photo_tasks(
-            geolocation_job, existing_photos, job_id, "Add geolocation job cancelled"
-        )
+        for idx, photo in enumerate(existing_photos):
+            if _scan_cancelled(idx, job_id, "Add geolocation job cancelled"):
+                return
+            AsyncTask(geolocation_job, photo, job_id).run()
 
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
 
-def geolocation_job(photo_id, job_id: UUID):
+def geolocation_job(photo: Photo, job_id: UUID):
     """
     Worker task to add geolocation for a single photo.
 
     Args:
-        photo_id: Primary key of the photo to process
+        photo: The photo to process
         job_id: Job ID for tracking progress
     """
-    photo = _photo_for_task(photo_id, job_id)
-    if photo is None:
-        return
     failed = False
     error = None
     try:
-        geolocate_photo(photo)
-        add_location_to_album_dates(photo)
+        photo.refresh_from_db()
+        photo._geolocate()
+        photo._add_location_to_album_dates()
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
         failed = True
         error_msg = f"Photo {photo.image_hash}: {str(err)}\n{traceback.format_exc()}"
         error = error_msg
@@ -689,7 +660,7 @@ def _extract_faces_for_photo(photo: Photo, job_id: UUID):
     failed = False
     error = None
     try:
-        extract_faces(photo)
+        photo._extract_faces()
     except Exception as err:
         failed = True
         error = _record_photo_error(photo, err)
@@ -713,7 +684,9 @@ def scan_faces(user, job_id: UUID, full_scan=False):
 
     try:
         existing_photos = _limit_to_photos_added_since_last_scan(
-            Photo.objects.owned_by(user).filter(thumbnail__thumbnail_big__isnull=False),
+            Photo.objects.filter(
+                Q(owner=user.id) & Q(thumbnail__thumbnail_big__isnull=False)
+            ),
             user,
             LongRunningJob.JOB_SCAN_FACES,
             full_scan,
@@ -726,7 +699,8 @@ def scan_faces(user, job_id: UUID, full_scan=False):
                 return
             _extract_faces_for_photo(photo, job_id)
     except Exception as err:
-        logger.exception("An error occurred: ")
+        util.logger.exception("An error occurred: ")
+        print(f"[ERR]: {err}")
         lrj.fail(error=err)
 
     generate_face_embeddings(user, uuid.uuid4())
